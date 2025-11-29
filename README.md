@@ -98,6 +98,8 @@ agent = cycls.Agent(
     )
 ```
 
+Create the tools function
+
 ```basic
 # 1. Duffel API Wrapper
 def duffel_request(endpoint: str, method: str = "GET", payload: dict = None) -> dict:

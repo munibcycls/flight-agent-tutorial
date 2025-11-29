@@ -359,7 +359,7 @@ async def flight_agent(context):
 # Step 5: Test Locally
 
 ```
-agent.deploy(prod=True)
+agent.deploy(prod=False)
 ```
 
 # Step 6: Add a header and intro section in UI

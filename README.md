@@ -337,9 +337,7 @@ async def flight_agent(context):
                 result = create_order(
                     offer_id=args.get("offer_id"), 
                     passengers=args.get("passengers"), 
-                    payment_type=args.get("payment_type", "balance"),
-                    total_amount=args.get("total_amount"),
-                    total_currency=args.get("total_currency")
+                    payment_type=args.get("payment_type", "balance")
                 )
                 if result.get("success"):
                     booking_ref = result.get("booking_reference")
@@ -495,15 +493,22 @@ import urllib.parse
 from openai import OpenAI
 import dotenv
 from datetime import datetime, timedelta
-from ui import header, intro
 
 dotenv.load_dotenv()
 
-agent = cycls.Agent(key = os.getenv("CYCLS_API_KEY"),
- pip=["requests", "openai", "python-dotenv"], copy=[".env"])
+agent = cycls.Agent(
+    key = os.getenv("CYCLS_API_KEY"),
+    pip=["requests", "openai", "python-dotenv"], 
+    copy=[".env"]
+    )
 
+# 1. Duffel API Wrapper
 def duffel_request(endpoint: str, method: str = "GET", payload: dict = None) -> dict:
-    headers = {"Authorization": f"Bearer {os.getenv('DUFFEL_API_KEY')}", "Content-Type": "application/json", "Duffel-Version": "v2"}
+    headers = {
+        "Authorization": f"Bearer {os.getenv('DUFFEL_API_KEY')}", 
+        "Content-Type": "application/json", 
+        "Duffel-Version": "v2"
+    }
     try:
         if method == "POST":
             r = requests.post(f"https://api.duffel.com/{endpoint}", headers=headers, json=payload, timeout=30)
@@ -517,28 +522,29 @@ def duffel_request(endpoint: str, method: str = "GET", payload: dict = None) -> 
         return r.json()
     except Exception as e:
         return {"error": str(e)}
-
+        
+# 2. Search Function
 def search_flights(origin: str, destination: str, departure_date: str, passengers: int = 1):
-    result = duffel_request("air/offer_requests", "POST", {"data": {"slices": [{"origin": origin, "destination": destination, "departure_date": departure_date}], "passengers": [{"type": "adult"}] * passengers, "cabin_class": "economy"}}) 
+    result = duffel_request("air/offer_requests", "POST", {
+        "data": {
+            "slices": [{"origin": origin, "destination": destination, "departure_date": departure_date}], 
+            "passengers": [{"type": "adult"}] * passengers, 
+            "cabin_class": "economy"
+        }
+    }) 
+    
     if "error" in result or "errors" in result:
+        # Error handling logic...
         errors = result.get('errors', [result.get('error')])
-        if isinstance(errors, list) and len(errors) > 0:
-            error_msg = errors[0].get('message', str(errors[0])) if isinstance(errors[0], dict) else str(errors[0])
-            return {"success": False, "error": "❌ Sorry, the departure date must be in the future. Please choose a date starting from tomorrow or later."} if 'must be after' in error_msg else {"success": False, "error": f"❌ {error_msg}"}
         return {"success": False, "error": f"❌ Error: {errors}"}
+        
     offers = result.get("data", {}).get("offers", [])
     if not offers:
         return {"success": False, "error": "No flights found for your search criteria."}
     
-    # Sort offers to prioritize Duffel Airways (ZZ) for reliable testing
-    # Duffel Airways usually has 'owner' -> 'iata_code' = 'ZZ' or 'name' = 'Duffel Airways'
-    offers.sort(key=lambda x: 0 if x.get("owner", {}).get("name") == "Duffel Airways" or x.get("owner", {}).get("iata_code") == "ZZ" else 1)
-    
-    offers = offers[:5] # Take top 5 after sorting
-    
-    offer_request_data = result.get("data", {})
-    passenger_ids = [p.get("id") for p in offer_request_data.get("passengers", [])]
-    offer_request_id = offer_request_data.get("id", "")
+    # Sort and slice offers (Prioritize Duffel Airways for testing)
+    offers.sort(key=lambda x: 0 if x.get("owner", {}).get("name") == "Duffel Airways" else 1)
+    offers = offers[:5]
     
     flights_data = []
     for offer in offers:
@@ -546,32 +552,21 @@ def search_flights(origin: str, destination: str, departure_date: str, passenger
             "offer_id": offer.get("id", ""),
             "airline": offer["owner"]["name"],
             "price": f"{offer['total_amount']} {offer['total_currency']}",
-            "total_amount": offer.get("total_amount"),
-            "total_currency": offer.get("total_currency"),
             "duration": offer["slices"][0]["duration"],
             "stops": len(offer["slices"][0].get("segments", [{}])) - 1,
-            "departure": offer["slices"][0]["segments"][0].get("departing_at", "N/A").split("T")[1][:5] if "T" in offer["slices"][0]["segments"][0].get("departing_at", "") else "N/A",
-            "arrival": offer["slices"][0]["segments"][-1].get("arriving_at", "N/A").split("T")[1][:5] if "T" in offer["slices"][0]["segments"][-1].get("arriving_at", "") else "N/A"
+            "departure": offer["slices"][0]["segments"][0].get("departing_at", "N/A").split("T")[1][:5],
+            "arrival": offer["slices"][0]["segments"][-1].get("arriving_at", "N/A").split("T")[1][:5]
         })
     
-    return {"success": True, "flights": flights_data, "origin": origin, "destination": destination, "passenger_ids": passenger_ids, "offer_request_id": offer_request_id}
-
+    return {"success": True, "flights": flights_data, "origin": origin, "destination": destination}
+    
+# 3. Get Offer Details
 def get_offer(offer_id: str):
     result = duffel_request(f"air/offers/{offer_id}", "GET")
-    if "error" in result or "errors" in result:
-        errors = result.get('errors', [result.get('error')])
-        if isinstance(errors, list) and len(errors) > 0:
-            error_msg = errors[0].get('message', str(errors[0])) if isinstance(errors[0], dict) else str(errors[0])
-            # If offer doesn't exist, it might have expired - this is okay, we can still try to create order
-            if "does not exist" in error_msg.lower() or "not found" in error_msg.lower():
-                return {"success": False, "error": f"❌ Offer may have expired. Error: {error_msg}", "expired": True}
-            return {"success": False, "error": f"❌ {error_msg}"}
-        return {"success": False, "error": f"❌ Error: {errors}"}
+    if "error" in result:
+        return {"success": False, "error": str(result['error'])}
+        
     offer_data = result.get("data", {})
-    if not offer_data:
-        return {"success": False, "error": "❌ No offer data returned", "expired": True}
-    
-    # Extract passenger IDs from the offer to ensure we use the correct ones for booking
     passenger_ids = [p.get("id") for p in offer_data.get("passengers", [])]
     
     return {
@@ -582,48 +577,37 @@ def get_offer(offer_id: str):
         "passenger_ids": passenger_ids
     }
 
-def create_order(offer_id: str, passengers: list, payment_type: str = "balance", total_amount: float = None, total_currency: str = None):
-    # Try to get the latest offer to ensure price is up-to-date
-    # If it fails (offer expired), use provided amounts as fallback
+# 4. Create Booking Order
+def create_order(offer_id: str, passengers: list, payment_type: str = "balance"):
+    # First ensure we have latest price
     offer_result = get_offer(offer_id)
-    if offer_result.get("success"):
-        total_amount = offer_result.get("total_amount")
-        total_currency = offer_result.get("total_currency")
-    elif offer_result.get("expired") and (total_amount is None or total_currency is None):
-        # If get_offer failed because offer expired and we don't have fallback amounts, return error
-        return {"success": False, "error": "❌ This offer has expired. Please search for flights again to get a fresh offer."}
-    
+    if not offer_result.get("success"):
+        return offer_result
+        
     payload = {
         "data": {
             "selected_offers": [offer_id],
             "payments": [{
                 "type": payment_type,
-                "currency": total_currency,
-                "amount": total_amount
+                "currency": offer_result["total_currency"],
+                "amount": offer_result["total_amount"]
             }],
             "passengers": passengers
         }
     }
     
     result = duffel_request("air/orders", "POST", payload)
-    if "error" in result or "errors" in result:
-        errors = result.get('errors', [result.get('error')])
-        if isinstance(errors, list) and len(errors) > 0:
-            error_obj = errors[0]
-            error_msg = error_obj.get('message', str(error_obj)) if isinstance(error_obj, dict) else str(error_obj)
-            
-            # Specific handling for expired offers in test mode
-            if isinstance(error_obj, dict) and error_obj.get('code') == 'offer_no_longer_available':
-                return {"success": False, "error": "❌ This flight offer has expired or is no longer available. In Test Mode, please try booking a 'Duffel Airways' flight for guaranteed success."}
-                
-            return {"success": False, "error": f"❌ {error_msg}"}
-        return {"success": False, "error": f"❌ Error: {errors}"}
+    if "error" in result:
+        return {"success": False, "error": str(result['error'])}
     
     order_data = result.get("data", {})
-    return {"success": True, "order": order_data, "booking_reference": order_data.get("booking_reference"), "order_id": order_data.get("id")}
+    return {
+        "success": True, 
+        "booking_reference": order_data.get("booking_reference"), 
+        "order_id": order_data.get("id")
+    }
 
-@agent("flightagent", header=header, intro=intro, auth=True)
-
+@agent("flightagent")
 async def flight_agent(context):
     import os
     from openai import OpenAI
@@ -744,9 +728,7 @@ async def flight_agent(context):
                 result = create_order(
                     offer_id=args.get("offer_id"), 
                     passengers=args.get("passengers"), 
-                    payment_type=args.get("payment_type", "balance"),
-                    total_amount=args.get("total_amount"),
-                    total_currency=args.get("total_currency")
+                    payment_type=args.get("payment_type", "balance")
                 )
                 if result.get("success"):
                     booking_ref = result.get("booking_reference")
@@ -762,5 +744,5 @@ async def flight_agent(context):
     
     return response_msg.content or "Hello! I'm your flight booking assistant. Where would you like to fly today?"
 
-agent.deploy(prod=True)
+agent.deploy(prod=False)
 ```

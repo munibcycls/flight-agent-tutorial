@@ -622,7 +622,7 @@ def create_order(offer_id: str, passengers: list, payment_type: str = "balance",
     order_data = result.get("data", {})
     return {"success": True, "order": order_data, "booking_reference": order_data.get("booking_reference"), "order_id": order_data.get("id")}
 
-@agent("flightagent", header=header, intro=intro)
+@agent("flightagent", header=header, intro=intro, auth=True)
 
 async def flight_agent(context):
     import os

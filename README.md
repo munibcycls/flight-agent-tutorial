@@ -200,6 +200,7 @@ We will now rewrite the main agent function to define the tools and handle the c
 Update the `agent.py` file:
 
 ```basic
+@agent("flightagent")
 async def flight_agent(context):
     import os
     from openai import OpenAI

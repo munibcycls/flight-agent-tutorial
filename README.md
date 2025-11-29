@@ -74,6 +74,8 @@ Write 4 helper functions (tools):
 
 Update your `agent.py` file with the following imports and helper functions.
 
+Start by importing and loading dotenv
+
 ```basic
 import cycls
 import os
@@ -84,7 +86,19 @@ import dotenv
 from datetime import datetime, timedelta
 
 dotenv.load_dotenv()
+```
 
+After importing, initialize the agent
+
+```basic
+agent = cycls.Agent(
+    key = os.getenv("CYCLS_API_KEY"),
+    pip=["requests", "openai", "python-dotenv"], 
+    copy=[".env"]
+    )
+```
+
+```basic
 # 1. Duffel API Wrapper
 def duffel_request(endpoint: str, method: str = "GET", payload: dict = None) -> dict:
     headers = {
